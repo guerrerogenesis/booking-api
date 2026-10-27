@@ -41,6 +41,7 @@ npm run dev        # http://localhost:3000/health
 | POST   | `/auth/password-reset/verify`  | — | Exchange the code for a reset token  |
 | POST   | `/auth/password-reset/confirm` | — | Set a new password with the token    |
 | GET    | `/professionals/:id` | — | Public profile with services and weekly availability |
+| GET    | `/professionals/:id/slots?serviceId&date` | — | Free start times for a service on a date |
 | GET    | `/professionals/me`  | Professional | Own profile                           |
 | PATCH  | `/professionals/me`  | Professional | Update bio                            |
 | POST   | `/professionals/me/services` | Professional | Create a service              |
@@ -69,6 +70,16 @@ Passwords are hashed with Node's built-in `scrypt` (random salt per user) and mu
 - A new code can't be requested within 60 seconds of the previous one.
 - The reset token is single-use, even under concurrent requests.
 - Per-IP rate limiting on login and every reset step (`429` with `Retry-After`).
+
+## Available slots
+
+`computeSlots` (`src/professionals/slots.ts`) is a pure function, unit-tested without a database:
+
+1. The date is read in the professional's timezone (DST-aware). Time off or a full day (`maxAppointmentsPerDay`) means no slots.
+2. Adjacent availability blocks are merged, so a service can span 09–12 and 12–15.
+3. Start times every 15 minutes where the whole service fits.
+4. Times that clash with confirmed appointments, including `bufferMinutes` before and after, are dropped.
+5. Booking window: at least 2 hours ahead, at most 60 days ahead.
 
 ## Notifications
 
