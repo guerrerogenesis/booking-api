@@ -1,0 +1,77 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  CLIENT
+  PROFESSIONAL
+}
+
+enum AppointmentStatus {
+  CONFIRMED
+  CANCELLED
+}
+
+model User {
+  id           String        @id @default(uuid())
+  email        String        @unique
+  passwordHash String
+  name         String
+  role         Role          @default(CLIENT)
+  createdAt    DateTime      @default(now())
+  professional Professional?
+  appointments Appointment[]
+}
+
+model Professional {
+  id           String         @id @default(uuid())
+  userId       String         @unique
+  user         User           @relation(fields: [userId], references: [id])
+  bio          String?
+  services     Service[]
+  availability Availability[]
+  appointments Appointment[]
+}
+
+model Service {
+  id              String        @id @default(uuid())
+  professionalId  String
+  professional    Professional  @relation(fields: [professionalId], references: [id])
+  name            String
+  durationMinutes Int
+  priceCents      Int
+  appointments    Appointment[]
+}
+
+// Weekly working hours. Minutes from midnight, UTC.
+model Availability {
+  id             String       @id @default(uuid())
+  professionalId String
+  professional   Professional @relation(fields: [professionalId], references: [id])
+  weekday        Int // 0 = Sunday ... 6 = Saturday
+  startMinute    Int
+  endMinute      Int
+
+  @@index([professionalId, weekday])
+}
+
+model Appointment {
+  id             String            @id @default(uuid())
+  professionalId String
+  professional   Professional      @relation(fields: [professionalId], references: [id])
+  clientId       String
+  client         User              @relation(fields: [clientId], references: [id])
+  serviceId      String
+  service        Service           @relation(fields: [serviceId], references: [id])
+  startsAt       DateTime          @db.Timestamptz
+  endsAt         DateTime          @db.Timestamptz
+  status         AppointmentStatus @default(CONFIRMED)
+  createdAt      DateTime          @default(now())
+
+  @@index([professionalId, startsAt])
+}

@@ -1,17 +1,41 @@
-# To install
-Is neccesary node version +20 and npm +10.
+# Booking API
 
-To deploy on local enviroment use "npm install" command 
-and then "npm run dev" to open http://localhost:5173/ on browser. 
+REST API for booking appointments with professionals (barbers, doctors, consultants...).
 
-If there is some questions please check the [Vite Docs](https://vite.dev/guide/) or contact me via [email](mailto:guerrerogenesisd@gmail.com)
+**Stack:** Node.js, TypeScript, Fastify, Prisma, PostgreSQL, Zod, Vitest.
 
+## Key design decision: no double booking
 
-# React + TypeScript + Vite
+Overlapping appointments are prevented by a PostgreSQL exclusion constraint,
+not just by application code. Two concurrent requests for the same slot cannot
+both succeed; the database rejects the second one.
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
-Currently, two official plugins are available:
+```sql
+EXCLUDE USING gist (
+  "professionalId" WITH =,
+  tstzrange("startsAt", "endsAt", '[)') WITH &&
+) WHERE ("status" = 'CONFIRMED')
+```
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react/README.md) uses [Babel](https://babeljs.io/) for Fast Refresh
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react-swc) uses [SWC](https://swc.rs/) for Fast Refresh
+## Getting started
 
+Requires Node 20+ and Docker.
+
+```bash
+cp .env.example .env
+docker compose up -d
+npm install
+npx prisma migrate dev
+npm run dev        # http://localhost:3000/health
+```
+
+## Scripts
+
+| Command             | Description            |
+| ------------------- | ---------------------- |
+| `npm run dev`       | Start with hot reload  |
+| `npm test`          | Run tests              |
+| `npm run typecheck` | Type-check the project |
+| `npm run build`     | Compile to `dist/`     |
+
+Questions? [Email me](mailto:guerrerogenesisd@gmail.com).
