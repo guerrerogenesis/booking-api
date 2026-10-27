@@ -10,9 +10,14 @@ REST API for booking appointments with professionals. The database itself preven
 
 ## Key design decision: no double booking
 
-Overlapping appointments are prevented by a PostgreSQL exclusion constraint,
-not just by application code. Two concurrent requests for the same slot cannot
-both succeed; the database rejects the second one.
+Two layers make sure two concurrent requests for the same slot can't both succeed:
+
+1. **Row lock.** A booking locks the professional's row (`SELECT ... FOR UPDATE`), then
+   recomputes the free slots and only accepts a start time that is one of them.
+2. **Exclusion constraint.** Even if application code had a bug, PostgreSQL itself rejects
+   overlapping confirmed appointments, and the API answers `409`, not `500`.
+
+A test fires two simultaneous bookings and checks that exactly one wins.
 
 ```sql
 EXCLUDE USING gist (
@@ -47,7 +52,7 @@ npm run dev        # http://localhost:3000/health
 | GET    | `/professionals/:id` | — | Public profile with services and weekly availability |
 | GET    | `/professionals/:id/slots?serviceId&date` | — | Free start times for a service on a date |
 | GET    | `/professionals/me`  | Professional | Own profile                           |
-| PATCH  | `/professionals/me`  | Professional | Update bio                            |
+| PATCH  | `/professionals/me`  | Professional | Update bio, timezone and booking settings |
 | POST   | `/professionals/me/services` | Professional | Create a service              |
 | PATCH  | `/professionals/me/services/:serviceId` | Professional | Update a service   |
 | DELETE | `/professionals/me/services/:serviceId` | Professional | Delete a service (`409` if it has appointments) |
@@ -55,6 +60,11 @@ npm run dev        # http://localhost:3000/health
 | GET    | `/professionals/me/time-off` | Professional | Upcoming days out of service    |
 | POST   | `/professionals/me/time-off` | Professional | Add days out of service (`409` if appointments exist on them) |
 | DELETE | `/professionals/me/time-off/:timeOffId` | Professional | Remove time off      |
+| POST   | `/appointments`              | Client | Book a free slot (`409` if not available) |
+| GET    | `/appointments/me?scope&limit&offset` | JWT | Own appointments (`upcoming` or `past`) |
+| POST   | `/appointments/:id/cancel`   | JWT    | Cancel: clients need 48h notice, professionals any time before start |
+
+Both parties are notified when an appointment is booked or cancelled.
 
 Each professional has an IANA `timezone` (e.g. `America/Mexico_City`); weekly availability and
 time off are interpreted in it. Optional booking settings: `maxAppointmentsPerDay` and

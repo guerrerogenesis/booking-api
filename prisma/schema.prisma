@@ -105,6 +105,8 @@ model Appointment {
   startsAt       DateTime          @db.Timestamptz
   endsAt         DateTime          @db.Timestamptz
   status         AppointmentStatus @default(CONFIRMED)
+  cancelledAt    DateTime?
+  cancelledBy    Role?
   createdAt      DateTime          @default(now())
 
   @@index([professionalId, startsAt])

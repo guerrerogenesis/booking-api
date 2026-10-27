@@ -10,9 +10,14 @@ API REST para agendar citas con profesionales. La propia base de datos impide qu
 
 ## Decisión de diseño clave: sin citas duplicadas
 
-Las citas que se empalman se evitan con una exclusion constraint de PostgreSQL,
-no solo con código de la aplicación. Dos solicitudes simultáneas para el mismo
-horario no pueden tener éxito las dos; la base de datos rechaza la segunda.
+Dos capas garantizan que dos solicitudes simultáneas para el mismo horario no puedan tener éxito las dos:
+
+1. **Bloqueo de fila.** Una reserva bloquea la fila del profesional (`SELECT ... FOR UPDATE`),
+   vuelve a calcular los horarios libres y solo acepta una hora de inicio que esté entre ellos.
+2. **Exclusion constraint.** Aunque el código de la aplicación tuviera un bug, PostgreSQL rechaza
+   por sí mismo las citas confirmadas que se empalman, y la API responde `409`, no `500`.
+
+Una prueba lanza dos reservas simultáneas y verifica que solo una gana.
 
 ```sql
 EXCLUDE USING gist (
@@ -47,7 +52,7 @@ npm run dev        # http://localhost:3000/health
 | GET    | `/professionals/:id` | — | Perfil público con servicios y disponibilidad semanal |
 | GET    | `/professionals/:id/slots?serviceId&date` | — | Horarios de inicio libres para un servicio en una fecha |
 | GET    | `/professionals/me`  | Professional | Perfil propio                         |
-| PATCH  | `/professionals/me`  | Professional | Actualiza la biografía                |
+| PATCH  | `/professionals/me`  | Professional | Actualiza la biografía, la zona horaria y la configuración de reservas |
 | POST   | `/professionals/me/services` | Professional | Crea un servicio              |
 | PATCH  | `/professionals/me/services/:serviceId` | Professional | Actualiza un servicio |
 | DELETE | `/professionals/me/services/:serviceId` | Professional | Elimina un servicio (`409` si tiene citas) |
@@ -55,6 +60,11 @@ npm run dev        # http://localhost:3000/health
 | GET    | `/professionals/me/time-off` | Professional | Próximos días fuera de servicio |
 | POST   | `/professionals/me/time-off` | Professional | Agrega días fuera de servicio (`409` si ya hay citas en ellos) |
 | DELETE | `/professionals/me/time-off/:timeOffId` | Professional | Elimina días fuera de servicio |
+| POST   | `/appointments`              | Client | Reserva un horario libre (`409` si no está disponible) |
+| GET    | `/appointments/me?scope&limit&offset` | JWT | Citas propias (`upcoming` o `past`) |
+| POST   | `/appointments/:id/cancel`   | JWT    | Cancela: el cliente necesita 48 h de anticipación; el profesional, en cualquier momento antes del inicio |
+
+Ambas partes reciben una notificación cuando se reserva o se cancela una cita.
 
 Cada profesional tiene una `timezone` IANA (p. ej. `America/Mexico_City`); la disponibilidad semanal y
 los días fuera de servicio se interpretan en esa zona horaria. Configuración de reservas opcional:

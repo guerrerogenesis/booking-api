@@ -1,4 +1,5 @@
-import { zonedTimeToUtc } from "./timezone.js";
+import type { Prisma, PrismaClient } from "@prisma/client";
+import { addDays, todayIn, weekdayOf, zonedTimeToUtc } from "./timezone.js";
 
 export const SLOT_STEP_MINUTES = 15;
 export const MIN_NOTICE_MINUTES = 120;
@@ -57,6 +58,69 @@ function mergeAdjacent(blocks: SlotInput["blocks"]) {
     else merged.push({ ...block });
   }
   return merged;
+}
+
+export function bookingWindow(timeZone: string) {
+  const firstDay = todayIn(timeZone);
+  return { firstDay, lastDay: addDays(firstDay, BOOKING_WINDOW_DAYS) };
+}
+
+interface BookingSettings {
+  id: string;
+  timezone: string;
+  maxAppointmentsPerDay: number | null;
+  bufferMinutes: number;
+}
+
+// Loads everything that affects availability on `date` and computes the free slots.
+// Accepts a transaction client so bookings can run it under a lock.
+export async function findAvailableSlots(
+  db: PrismaClient | Prisma.TransactionClient,
+  professional: BookingSettings,
+  durationMinutes: number,
+  date: string,
+): Promise<Slot[]> {
+  const { id, timezone, bufferMinutes, maxAppointmentsPerDay } = professional;
+  const { firstDay, lastDay } = bookingWindow(timezone);
+  if (date < firstDay || date > lastDay) return [];
+
+  const dayStart = zonedTimeToUtc(date, 0, timezone);
+  const nextDayStart = zonedTimeToUtc(addDays(date, 1), 0, timezone);
+  const bufferMs = bufferMinutes * 60_000;
+
+  const [blocks, timeOff, appointments] = await Promise.all([
+    db.availability.findMany({
+      where: { professionalId: id, weekday: weekdayOf(date) },
+      select: { startMinute: true, endMinute: true },
+    }),
+    db.timeOff.findFirst({
+      where: { professionalId: id, startDate: { lte: new Date(date) }, endDate: { gte: new Date(date) } },
+      select: { id: true },
+    }),
+    // Includes neighbors close enough to the day to matter for the buffer.
+    db.appointment.findMany({
+      where: {
+        professionalId: id,
+        status: "CONFIRMED",
+        startsAt: { lt: new Date(nextDayStart.getTime() + bufferMs) },
+        endsAt: { gt: new Date(dayStart.getTime() - bufferMs) },
+      },
+      select: { startsAt: true, endsAt: true },
+    }),
+  ]);
+
+  const bookedThatDay = appointments.filter((a) => a.startsAt >= dayStart && a.startsAt < nextDayStart).length;
+  if (timeOff || (maxAppointmentsPerDay !== null && bookedThatDay >= maxAppointmentsPerDay)) return [];
+
+  return computeSlots({
+    date,
+    timeZone: timezone,
+    blocks,
+    durationMinutes,
+    bufferMinutes,
+    appointments,
+    notBefore: new Date(Date.now() + MIN_NOTICE_MINUTES * 60_000),
+  });
 }
 
 function formatMinutes(minutes: number) {

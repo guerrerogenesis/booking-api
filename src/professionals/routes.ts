@@ -3,8 +3,8 @@ import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import { requireRole } from "../auth/plugin.js";
 import { prisma } from "../db.js";
-import { BOOKING_WINDOW_DAYS, computeSlots, MIN_NOTICE_MINUTES } from "./slots.js";
-import { addDays, canonicalTimeZone, todayIn, weekdayOf, zonedTimeToUtc } from "./timezone.js";
+import { bookingWindow, findAvailableSlots } from "./slots.js";
+import { canonicalTimeZone, todayIn } from "./timezone.js";
 
 declare module "fastify" {
   interface FastifyRequest {
@@ -154,55 +154,13 @@ export async function professionalRoutes(app: FastifyInstance) {
     const [service] = professional.services;
     if (!service) return reply.status(404).send({ error: "Service not found" });
 
-    const { timezone, bufferMinutes, maxAppointmentsPerDay } = professional;
-    const today = todayIn(timezone);
-    const lastDay = addDays(today, BOOKING_WINDOW_DAYS);
-    if (date < today || date > lastDay) {
-      return reply.status(400).send({ error: `date must be between ${today} and ${lastDay}` });
+    const { firstDay, lastDay } = bookingWindow(professional.timezone);
+    if (date < firstDay || date > lastDay) {
+      return reply.status(400).send({ error: `date must be between ${firstDay} and ${lastDay}` });
     }
 
-    const dayStart = zonedTimeToUtc(date, 0, timezone);
-    const nextDayStart = zonedTimeToUtc(addDays(date, 1), 0, timezone);
-    const bufferMs = bufferMinutes * 60_000;
-
-    const [blocks, timeOff, appointments] = await Promise.all([
-      prisma.availability.findMany({
-        where: { professionalId: id, weekday: weekdayOf(date) },
-        select: { startMinute: true, endMinute: true },
-      }),
-      prisma.timeOff.findFirst({
-        where: { professionalId: id, startDate: { lte: new Date(date) }, endDate: { gte: new Date(date) } },
-        select: { id: true },
-      }),
-      // Includes neighbors close enough to the day to matter for the buffer.
-      prisma.appointment.findMany({
-        where: {
-          professionalId: id,
-          status: "CONFIRMED",
-          startsAt: { lt: new Date(nextDayStart.getTime() + bufferMs) },
-          endsAt: { gt: new Date(dayStart.getTime() - bufferMs) },
-        },
-        select: { startsAt: true, endsAt: true },
-      }),
-    ]);
-
-    const bookedToday = appointments.filter((a) => a.startsAt >= dayStart && a.startsAt < nextDayStart).length;
-    const dayIsFull = maxAppointmentsPerDay !== null && bookedToday >= maxAppointmentsPerDay;
-
-    const slots =
-      timeOff || dayIsFull
-        ? []
-        : computeSlots({
-            date,
-            timeZone: timezone,
-            blocks,
-            durationMinutes: service.durationMinutes,
-            bufferMinutes,
-            appointments,
-            notBefore: new Date(Date.now() + MIN_NOTICE_MINUTES * 60_000),
-          });
-
-    return { date, timezone, durationMinutes: service.durationMinutes, slots };
+    const slots = await findAvailableSlots(prisma, { id, ...professional }, service.durationMinutes, date);
+    return { date, timezone: professional.timezone, durationMinutes: service.durationMinutes, slots };
   });
 
   // Everything under /me is scoped to the authenticated professional, so ownership

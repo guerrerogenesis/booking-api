@@ -48,9 +48,19 @@ export function weekdayOf(date: string): number {
   return new Date(`${date}T00:00:00Z`).getUTCDay();
 }
 
-// Today's date as YYYY-MM-DD in the given zone.
-export function todayIn(timeZone: string): string {
+// The local date (YYYY-MM-DD) of an instant in the given zone.
+export function dateIn(timeZone: string, instant: Date): string {
   return new Intl.DateTimeFormat("en-CA", { timeZone, year: "numeric", month: "2-digit", day: "2-digit" }).format(
-    new Date(),
+    instant,
   );
+}
+
+export function todayIn(timeZone: string): string {
+  return dateIn(timeZone, new Date());
+}
+
+// "YYYY-MM-DD HH:MM" in the given zone, for messages.
+export function formatLocal(instant: Date, timeZone: string): string {
+  const time = new Intl.DateTimeFormat("en-US", { timeZone, hourCycle: "h23", hour: "2-digit", minute: "2-digit" });
+  return `${dateIn(timeZone, instant)} ${time.format(instant)}`;
 }
