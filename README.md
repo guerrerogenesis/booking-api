@@ -1,6 +1,10 @@
 # Booking API
 
-REST API for booking appointments with professionals (barbers, doctors, consultants...).
+**English** · [Español](README.es.md)
+
+<!-- portfolio:en -->
+REST API for booking appointments with professionals. The database itself prevents overlapping appointments, and the password reset flow is built to resist account enumeration and brute-force attempts.
+<!-- /portfolio:en -->
 
 **Stack:** Node.js, TypeScript, Fastify, Prisma, PostgreSQL, Zod, Vitest.
 
