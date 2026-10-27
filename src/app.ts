@@ -1,6 +1,7 @@
 import rateLimit from "@fastify/rate-limit";
 import Fastify, { type FastifyError } from "fastify";
 import { ZodError } from "zod";
+import { rescheduleRoutes } from "./appointments/reschedule.js";
 import { appointmentRoutes } from "./appointments/routes.js";
 import { passwordResetRoutes } from "./auth/password-reset.js";
 import { registerAuth } from "./auth/plugin.js";
@@ -38,6 +39,7 @@ export function buildApp(options: { notifier?: Notifier } = {}) {
   app.register(passwordResetRoutes, { prefix: "/auth/password-reset" });
   app.register(professionalRoutes, { prefix: "/professionals" });
   app.register(appointmentRoutes, { prefix: "/appointments" });
+  app.register(rescheduleRoutes, { prefix: "/appointments" });
 
   return app;
 }

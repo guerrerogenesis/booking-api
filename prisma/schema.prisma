@@ -109,5 +109,32 @@ model Appointment {
   cancelledBy    Role?
   createdAt      DateTime          @default(now())
 
+  rescheduleRequests RescheduleRequest[]
+
   @@index([professionalId, startsAt])
+}
+
+enum RescheduleStatus {
+  PENDING
+  ACCEPTED
+  REJECTED
+  WITHDRAWN
+  EXPIRED
+  CANCELLED
+}
+
+// A client's proposal to move an appointment. At most one PENDING per appointment
+// (partial unique index in the migration).
+model RescheduleRequest {
+  id              String           @id @default(uuid())
+  appointmentId   String
+  appointment     Appointment      @relation(fields: [appointmentId], references: [id])
+  startsAt        DateTime         @db.Timestamptz
+  endsAt          DateTime         @db.Timestamptz
+  status          RescheduleStatus @default(PENDING)
+  rejectionReason String?
+  createdAt       DateTime         @default(now())
+  respondedAt     DateTime?
+
+  @@index([appointmentId])
 }

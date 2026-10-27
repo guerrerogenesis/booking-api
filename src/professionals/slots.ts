@@ -1,5 +1,5 @@
 import type { Prisma, PrismaClient } from "@prisma/client";
-import { addDays, todayIn, weekdayOf, zonedTimeToUtc } from "./timezone.js";
+import { addDays, dateIn, todayIn, weekdayOf, zonedTimeToUtc } from "./timezone.js";
 
 export const SLOT_STEP_MINUTES = 15;
 export const MIN_NOTICE_MINUTES = 120;
@@ -72,13 +72,17 @@ interface BookingSettings {
   bufferMinutes: number;
 }
 
+type Db = PrismaClient | Prisma.TransactionClient;
+
 // Loads everything that affects availability on `date` and computes the free slots.
-// Accepts a transaction client so bookings can run it under a lock.
+// Accepts a transaction client so bookings can run it under a lock. When moving an
+// appointment, pass its id so its current time doesn't block the new one.
 export async function findAvailableSlots(
-  db: PrismaClient | Prisma.TransactionClient,
+  db: Db,
   professional: BookingSettings,
   durationMinutes: number,
   date: string,
+  excludeAppointmentId?: string,
 ): Promise<Slot[]> {
   const { id, timezone, bufferMinutes, maxAppointmentsPerDay } = professional;
   const { firstDay, lastDay } = bookingWindow(timezone);
@@ -102,6 +106,7 @@ export async function findAvailableSlots(
       where: {
         professionalId: id,
         status: "CONFIRMED",
+        id: excludeAppointmentId ? { not: excludeAppointmentId } : undefined,
         startsAt: { lt: new Date(nextDayStart.getTime() + bufferMs) },
         endsAt: { gt: new Date(dayStart.getTime() - bufferMs) },
       },
@@ -121,6 +126,19 @@ export async function findAvailableSlots(
     appointments,
     notBefore: new Date(Date.now() + MIN_NOTICE_MINUTES * 60_000),
   });
+}
+
+// The free slot starting exactly at `startsAt`, if there is one.
+export async function findSlotAt(
+  db: Db,
+  professional: BookingSettings,
+  durationMinutes: number,
+  startsAt: Date,
+  excludeAppointmentId?: string,
+): Promise<Slot | undefined> {
+  const date = dateIn(professional.timezone, startsAt);
+  const slots = await findAvailableSlots(db, professional, durationMinutes, date, excludeAppointmentId);
+  return slots.find((slot) => slot.startsAt.getTime() === startsAt.getTime());
 }
 
 function formatMinutes(minutes: number) {

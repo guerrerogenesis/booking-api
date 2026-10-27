@@ -84,6 +84,7 @@ describe("POST /appointments", () => {
       service: { id: serviceId, name: "Haircut", durationMinutes: 60, priceCents: 25000 },
       professional: { id: professional.id, name: "Test professional", timezone: "America/Mexico_City" },
       client: { id: client.user.id, name: "Test client" },
+      pendingReschedule: null,
     });
     expect(JSON.stringify(res.json())).not.toContain("@example.com");
 

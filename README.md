@@ -64,7 +64,18 @@ npm run dev        # http://localhost:3000/health
 | GET    | `/appointments/me?scope&limit&offset` | JWT | Own appointments (`upcoming` or `past`) |
 | POST   | `/appointments/:id/cancel`   | JWT    | Cancel: clients need 48h notice, professionals any time before start |
 
-Both parties are notified when an appointment is booked or cancelled.
+| POST   | `/appointments/:id/reschedule-requests` | Client | Propose a new time (48h notice, one pending at a time) |
+| GET    | `/appointments/:id/reschedule-requests` | JWT    | Request history for the appointment |
+| POST   | `/appointments/:id/reschedule-requests/:requestId/accept` | Professional | Move the appointment to the proposed time |
+| POST   | `/appointments/:id/reschedule-requests/:requestId/reject` | Professional | Reject, with an optional `reason` |
+| POST   | `/appointments/:id/reschedule-requests/:requestId/withdraw` | Client | Withdraw a pending request |
+| POST   | `/appointments/:id/reschedule` | Professional | Move an appointment directly, any time before it starts |
+
+Both parties are notified when an appointment is booked, moved or cancelled.
+
+Reschedule requests don't hold the proposed time: accepting re-checks it under the same lock as
+bookings. A partial unique index allows only one `PENDING` request per appointment, and pending
+requests expire automatically once fewer than 48 hours remain (checked lazily, no background job).
 
 Each professional has an IANA `timezone` (e.g. `America/Mexico_City`); weekly availability and
 time off are interpreted in it. Optional booking settings: `maxAppointmentsPerDay` and

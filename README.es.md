@@ -64,7 +64,18 @@ npm run dev        # http://localhost:3000/health
 | GET    | `/appointments/me?scope&limit&offset` | JWT | Citas propias (`upcoming` o `past`) |
 | POST   | `/appointments/:id/cancel`   | JWT    | Cancela: el cliente necesita 48 h de anticipación; el profesional, en cualquier momento antes del inicio |
 
-Ambas partes reciben una notificación cuando se reserva o se cancela una cita.
+| POST   | `/appointments/:id/reschedule-requests` | Client | Propone un nuevo horario (48 h de anticipación, una solicitud pendiente a la vez) |
+| GET    | `/appointments/:id/reschedule-requests` | JWT    | Historial de solicitudes de la cita |
+| POST   | `/appointments/:id/reschedule-requests/:requestId/accept` | Professional | Mueve la cita al horario propuesto |
+| POST   | `/appointments/:id/reschedule-requests/:requestId/reject` | Professional | Rechaza, con un `reason` opcional |
+| POST   | `/appointments/:id/reschedule-requests/:requestId/withdraw` | Client | Retira una solicitud pendiente |
+| POST   | `/appointments/:id/reschedule` | Professional | Mueve una cita directamente, en cualquier momento antes de que empiece |
+
+Ambas partes reciben una notificación cuando se reserva, se mueve o se cancela una cita.
+
+Las solicitudes de cambio no apartan el horario propuesto: al aceptarla se vuelve a verificar con el mismo
+bloqueo que usan las reservas. Un índice único parcial permite solo una solicitud `PENDING` por cita, y las
+solicitudes pendientes vencen solas cuando faltan menos de 48 horas (se revisa al momento, sin procesos en segundo plano).
 
 Cada profesional tiene una `timezone` IANA (p. ej. `America/Mexico_City`); la disponibilidad semanal y
 los días fuera de servicio se interpretan en esa zona horaria. Configuración de reservas opcional:
