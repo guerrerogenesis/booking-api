@@ -18,12 +18,12 @@ enum AppointmentStatus {
 }
 
 model User {
-  id           String        @id @default(uuid())
-  email        String        @unique
-  passwordHash String
-  name         String
-  role         Role          @default(CLIENT)
-  createdAt    DateTime      @default(now())
+  id             String          @id @default(uuid())
+  email          String          @unique
+  passwordHash   String
+  name           String
+  role           Role            @default(CLIENT)
+  createdAt      DateTime        @default(now())
   professional   Professional?
   appointments   Appointment[]
   passwordResets PasswordReset[]
@@ -44,13 +44,32 @@ model PasswordReset {
 }
 
 model Professional {
-  id           String         @id @default(uuid())
-  userId       String         @unique
-  user         User           @relation(fields: [userId], references: [id])
-  bio          String?
-  services     Service[]
-  availability Availability[]
-  appointments Appointment[]
+  id                    String         @id @default(uuid())
+  userId                String         @unique
+  user                  User           @relation(fields: [userId], references: [id])
+  bio                   String?
+  // IANA name, e.g. "America/Mexico_City". Availability and time off are in this zone.
+  timezone              String         @default("UTC")
+  // null = no daily limit.
+  maxAppointmentsPerDay Int?
+  bufferMinutes         Int            @default(0)
+  services              Service[]
+  availability          Availability[]
+  appointments          Appointment[]
+  timeOff               TimeOff[]
+}
+
+// Whole days out of service, inclusive, in the professional's timezone.
+model TimeOff {
+  id             String       @id @default(uuid())
+  professionalId String
+  professional   Professional @relation(fields: [professionalId], references: [id])
+  startDate      DateTime     @db.Date
+  endDate        DateTime     @db.Date
+  reason         String?
+  createdAt      DateTime     @default(now())
+
+  @@index([professionalId, startDate])
 }
 
 model Service {
@@ -63,7 +82,7 @@ model Service {
   appointments    Appointment[]
 }
 
-// Weekly working hours. Minutes from midnight, UTC.
+// Weekly working hours. Minutes from midnight, in the professional's timezone.
 model Availability {
   id             String       @id @default(uuid())
   professionalId String

@@ -4,15 +4,16 @@ import { ZodError } from "zod";
 import { passwordResetRoutes } from "./auth/password-reset.js";
 import { registerAuth } from "./auth/plugin.js";
 import { authRoutes } from "./auth/routes.js";
-import { createSmtpMailer, type Mailer } from "./mailer.js";
+import { createNotifier, type Notifier } from "./notifications/notifier.js";
+import { professionalRoutes } from "./professionals/routes.js";
 
 declare module "fastify" {
   interface FastifyInstance {
-    mailer: Mailer;
+    notifier: Notifier;
   }
 }
 
-export function buildApp(options: { mailer?: Mailer } = {}) {
+export function buildApp(options: { notifier?: Notifier } = {}) {
   const app = Fastify({ logger: process.env.NODE_ENV !== "test" });
 
   app.setErrorHandler<FastifyError | ZodError>((error, request, reply) => {
@@ -27,13 +28,14 @@ export function buildApp(options: { mailer?: Mailer } = {}) {
   });
 
   registerAuth(app);
-  app.decorate("mailer", options.mailer ?? createSmtpMailer());
+  app.decorate("notifier", options.notifier ?? createNotifier());
   // Opt-in per route via `config.rateLimit`. In-memory store: use Redis when running multiple instances.
   app.register(rateLimit, { global: false });
 
   app.get("/health", async () => ({ status: "ok" }));
   app.register(authRoutes, { prefix: "/auth" });
   app.register(passwordResetRoutes, { prefix: "/auth/password-reset" });
+  app.register(professionalRoutes, { prefix: "/professionals" });
 
   return app;
 }

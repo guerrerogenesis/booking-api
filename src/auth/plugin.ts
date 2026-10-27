@@ -1,6 +1,6 @@
 import fastifyJwt from "@fastify/jwt";
 import type { Role } from "@prisma/client";
-import type { FastifyInstance, FastifyRequest } from "fastify";
+import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 
 declare module "@fastify/jwt" {
   interface FastifyJWT {
@@ -24,4 +24,11 @@ export function registerAuth(app: FastifyInstance) {
   app.decorate("authenticate", async (request: FastifyRequest) => {
     await request.jwtVerify();
   });
+}
+
+export function requireRole(role: Role) {
+  return async (request: FastifyRequest, reply: FastifyReply) => {
+    await request.jwtVerify();
+    if (request.user.role !== role) return reply.status(403).send({ error: "Forbidden" });
+  };
 }

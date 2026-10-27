@@ -56,13 +56,12 @@ export async function passwordResetRoutes(app: FastifyInstance) {
         }),
       ]);
       // Not awaited, so response time doesn't reveal whether the email exists.
-      app.mailer
-        .send({
-          to: user.email,
+      app.notifier
+        .notify(user, {
           subject: "Your password reset code",
-          text: `Your code is ${code}. It expires in 15 minutes. If you didn't request it, ignore this email.`,
+          text: `Your code is ${code}. It expires in 15 minutes. If you didn't request it, ignore this message.`,
         })
-        .catch((err) => request.log.error(err, "Failed to send password reset email"));
+        .catch((err) => request.log.error(err, "Failed to send password reset code"));
     }
 
     // Same response in every case to avoid revealing which emails are registered.

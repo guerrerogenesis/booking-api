@@ -1,16 +1,8 @@
 import nodemailer from "nodemailer";
+import type { Notifier } from "./notifier.js";
 
-export interface Mail {
-  to: string;
-  subject: string;
-  text: string;
-}
-
-export interface Mailer {
-  send(mail: Mail): Promise<void>;
-}
-
-export function createSmtpMailer(): Mailer {
+// Adapts nodemailer (SMTP) to the Notifier interface.
+export function createEmailNotifier(): Notifier {
   const transport = nodemailer.createTransport({
     host: process.env.SMTP_HOST ?? "localhost",
     port: Number(process.env.SMTP_PORT ?? 1025),
@@ -18,8 +10,8 @@ export function createSmtpMailer(): Mailer {
   const from = process.env.MAIL_FROM ?? "no-reply@booking.local";
 
   return {
-    async send(mail) {
-      await transport.sendMail({ from, ...mail });
+    async notify(recipient, { subject, text }) {
+      await transport.sendMail({ from, to: recipient.email, subject, text });
     },
   };
 }

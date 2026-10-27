@@ -40,6 +40,24 @@ npm run dev        # http://localhost:3000/health
 | POST   | `/auth/password-reset/request` | — | Email a 6-digit code (always `202`)  |
 | POST   | `/auth/password-reset/verify`  | — | Exchange the code for a reset token  |
 | POST   | `/auth/password-reset/confirm` | — | Set a new password with the token    |
+| GET    | `/professionals/:id` | — | Public profile with services and weekly availability |
+| GET    | `/professionals/me`  | Professional | Own profile                           |
+| PATCH  | `/professionals/me`  | Professional | Update bio                            |
+| POST   | `/professionals/me/services` | Professional | Create a service              |
+| PATCH  | `/professionals/me/services/:serviceId` | Professional | Update a service   |
+| DELETE | `/professionals/me/services/:serviceId` | Professional | Delete a service (`409` if it has appointments) |
+| PUT    | `/professionals/me/availability` | Professional | Replace the weekly schedule |
+| GET    | `/professionals/me/time-off` | Professional | Upcoming days out of service    |
+| POST   | `/professionals/me/time-off` | Professional | Add days out of service (`409` if appointments exist on them) |
+| DELETE | `/professionals/me/time-off/:timeOffId` | Professional | Remove time off      |
+
+Each professional has an IANA `timezone` (e.g. `America/Mexico_City`); weekly availability and
+time off are interpreted in it. Optional booking settings: `maxAppointmentsPerDay` and
+`bufferMinutes` between appointments.
+
+Routes under `/professionals/me` only ever query the authenticated professional's own data,
+so ownership is enforced by the queries themselves. Another professional's service returns
+`404`, not `403`, so its existence isn't revealed.
 
 Passwords are hashed with Node's built-in `scrypt` (random salt per user) and must be
 8–128 characters with an uppercase letter, a lowercase letter, a number and a symbol, and no spaces.
@@ -51,6 +69,13 @@ Passwords are hashed with Node's built-in `scrypt` (random salt per user) and mu
 - A new code can't be requested within 60 seconds of the previous one.
 - The reset token is single-use, even under concurrent requests.
 - Per-IP rate limiting on login and every reset step (`429` with `Retry-After`).
+
+## Notifications
+
+Notifications go through a `Notifier` interface (adapter pattern), so the channel can change
+without touching business code. Email (SMTP via nodemailer) is the default; select the channel
+with `NOTIFIER_CHANNEL`. To add SMS or WhatsApp, implement `Notifier` in `src/notifications/`
+and register it in `createNotifier()`.
 
 In development, emails are caught by [Mailpit](https://mailpit.axllent.org/): open http://localhost:8025.
 

@@ -2,14 +2,14 @@ import { afterAll, afterEach, beforeEach, describe, expect, it } from "vitest";
 import { resetDb } from "../../test/db.js";
 import { buildApp } from "../app.js";
 import { prisma } from "../db.js";
-import type { Mail } from "../mailer.js";
+import type { Notification, Recipient } from "../notifications/notifier.js";
 
 const email = "ana@example.com";
 const oldPassword = "Old$ecret1";
 const newPassword = "N3w$ecret!";
 
 let app: ReturnType<typeof buildApp>;
-let sent: Mail[];
+let sent: (Notification & { to: Recipient })[];
 
 function post(url: string, payload: object) {
   return app.inject({ method: "POST", url: `/auth/password-reset${url}`, payload });
@@ -29,7 +29,7 @@ async function getResetToken() {
 beforeEach(async () => {
   await resetDb();
   sent = [];
-  app = buildApp({ mailer: { send: async (mail) => void sent.push(mail) } });
+  app = buildApp({ notifier: { notify: async (to, notification) => void sent.push({ to, ...notification }) } });
   await app.inject({
     method: "POST",
     url: "/auth/register",
@@ -60,7 +60,7 @@ describe("POST /request", () => {
 
     expect(res.statusCode).toBe(202);
     expect(sent).toHaveLength(1);
-    expect(sent[0].to).toBe(email);
+    expect(sent[0].to.email).toBe(email);
     expect(lastCode()).toMatch(/^\d{6}$/);
   });
 
