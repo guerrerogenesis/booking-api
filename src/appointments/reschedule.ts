@@ -3,6 +3,7 @@ import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import { requireRole } from "../auth/plugin.js";
 import { prisma } from "../db.js";
+import { appointmentResponse, doc, rescheduleRequestResponse, withOperationIds } from "../docs.js";
 import { findSlotAt } from "../professionals/slots.js";
 import {
   appointmentSelect,
@@ -28,9 +29,73 @@ const rejectBody = z.strictObject({ reason: z.string().trim().min(1).max(200).op
 
 const notAvailable = { status: 409, body: { error: "The requested time is not available" } } as const;
 
+const tag = "Reschedule";
+const docs = withOperationIds({
+  requestReschedule: doc({
+    tag,
+    summary: "Request a new time",
+    description:
+      `Clients only, at least ${CLIENT_CHANGE_NOTICE_HOURS} hours before the appointment (\`403\` otherwise). ` +
+      "The new time must be available, but it isn't held while the request is pending. " +
+      "One pending request per appointment. Pending requests expire once fewer than 48 hours remain.",
+    auth: true,
+    params: idParams,
+    body: startsAtBody,
+    response: { 201: rescheduleRequestResponse },
+    errors: [403, 404, 409],
+  }),
+  listRescheduleRequests: doc({
+    tag,
+    summary: "Request history",
+    auth: true,
+    params: idParams,
+    response: { 200: z.array(rescheduleRequestResponse) },
+    errors: [404],
+  }),
+  acceptReschedule: doc({
+    tag,
+    summary: "Accept a request",
+    description: "Professionals only. Re-checks that the time is still free (`409` if it was booked meanwhile).",
+    auth: true,
+    params: requestParams,
+    response: { 200: appointmentResponse },
+    errors: [403, 404, 409],
+  }),
+  rejectReschedule: doc({
+    tag,
+    summary: "Reject a request",
+    description: "Professionals only. The optional reason is sent to the client.",
+    auth: true,
+    params: requestParams,
+    body: rejectBody,
+    response: { 200: rescheduleRequestResponse },
+    errors: [403, 404, 409],
+  }),
+  withdrawReschedule: doc({
+    tag,
+    summary: "Withdraw a pending request",
+    description: "Clients only.",
+    auth: true,
+    params: requestParams,
+    response: { 200: rescheduleRequestResponse },
+    errors: [403, 404],
+  }),
+  moveAppointment: doc({
+    tag,
+    summary: "Move an appointment directly",
+    description:
+      "Professionals only, any time before the appointment starts. Closes any pending request and notifies the client.",
+    auth: true,
+    params: idParams,
+    body: startsAtBody,
+    response: { 200: appointmentResponse },
+    errors: [403, 404, 409],
+  }),
+});
+
 export async function rescheduleRoutes(app: FastifyInstance) {
   // Client proposes a new time; the appointment stays as is until the professional answers.
-  app.post("/:id/reschedule-requests", { onRequest: requireRole("CLIENT") }, async (request, reply) => {
+  app.post("/:id/reschedule-requests", { schema: docs.requestReschedule, onRequest: requireRole("CLIENT") }, async (request, reply) => {
     const { id } = idParams.parse(request.params);
     const requested = new Date(startsAtBody.parse(request.body).startsAt);
 
@@ -75,7 +140,7 @@ export async function rescheduleRoutes(app: FastifyInstance) {
     }
   });
 
-  app.get("/:id/reschedule-requests", { onRequest: app.authenticate }, async (request, reply) => {
+  app.get("/:id/reschedule-requests", { schema: docs.listRescheduleRequests, onRequest: app.authenticate }, async (request, reply) => {
     const { id } = idParams.parse(request.params);
 
     await expireStaleRequests(prisma);
@@ -89,7 +154,7 @@ export async function rescheduleRoutes(app: FastifyInstance) {
 
   app.post(
     "/:id/reschedule-requests/:requestId/accept",
-    { onRequest: requireRole("PROFESSIONAL") },
+    { schema: docs.acceptReschedule, onRequest: requireRole("PROFESSIONAL") },
     async (request, reply) => {
       const { id, requestId } = requestParams.parse(request.params);
 
@@ -139,7 +204,7 @@ export async function rescheduleRoutes(app: FastifyInstance) {
 
   app.post(
     "/:id/reschedule-requests/:requestId/reject",
-    { onRequest: requireRole("PROFESSIONAL") },
+    { schema: docs.rejectReschedule, onRequest: requireRole("PROFESSIONAL") },
     async (request, reply) => {
       const { id, requestId } = requestParams.parse(request.params);
       const { reason } = rejectBody.parse(request.body ?? {});
@@ -168,7 +233,7 @@ export async function rescheduleRoutes(app: FastifyInstance) {
 
   app.post(
     "/:id/reschedule-requests/:requestId/withdraw",
-    { onRequest: requireRole("CLIENT") },
+    { schema: docs.withdrawReschedule, onRequest: requireRole("CLIENT") },
     async (request, reply) => {
       const { id, requestId } = requestParams.parse(request.params);
 
@@ -182,7 +247,7 @@ export async function rescheduleRoutes(app: FastifyInstance) {
   );
 
   // The professional moves an appointment directly, at any time before it starts.
-  app.post("/:id/reschedule", { onRequest: requireRole("PROFESSIONAL") }, async (request, reply) => {
+  app.post("/:id/reschedule", { schema: docs.moveAppointment, onRequest: requireRole("PROFESSIONAL") }, async (request, reply) => {
     const { id } = idParams.parse(request.params);
     const requested = new Date(startsAtBody.parse(request.body).startsAt);
 

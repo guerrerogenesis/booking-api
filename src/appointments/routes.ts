@@ -2,6 +2,7 @@ import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import { requireRole } from "../auth/plugin.js";
 import { prisma } from "../db.js";
+import { appointmentResponse, doc, withOperationIds } from "../docs.js";
 import { findSlotAt } from "../professionals/slots.js";
 import {
   appointmentSelect,
@@ -30,8 +31,39 @@ const listQuery = z.strictObject({
   offset: z.coerce.number().int().min(0).default(0),
 });
 
+const docs = withOperationIds({
+  bookAppointment: doc({
+    tag: "Appointments",
+    summary: "Book an appointment",
+    description:
+      "Clients only. `startsAt` must be one of the times returned by `GET /professionals/{id}/slots`; " +
+      "otherwise `409`. Both parties are notified.",
+    auth: true,
+    body: createBody,
+    response: { 201: appointmentResponse },
+    errors: [403, 404, 409],
+  }),
+  listMyAppointments: doc({
+    tag: "Appointments",
+    summary: "My appointments",
+    description: "A client's own appointments, or a professional's appointments with clients.",
+    auth: true,
+    querystring: listQuery,
+    response: { 200: z.array(appointmentResponse) },
+  }),
+  cancelAppointment: doc({
+    tag: "Appointments",
+    summary: "Cancel an appointment",
+    description: `Clients need at least ${CLIENT_CHANGE_NOTICE_HOURS} hours of notice (\`403\` otherwise); professionals can cancel any time before it starts. The other party is notified.`,
+    auth: true,
+    params: idParams,
+    response: { 200: appointmentResponse },
+    errors: [403, 404, 409],
+  }),
+});
+
 export async function appointmentRoutes(app: FastifyInstance) {
-  app.post("/", { onRequest: requireRole("CLIENT") }, async (request, reply) => {
+  app.post("", { schema: docs.bookAppointment, onRequest: requireRole("CLIENT") }, async (request, reply) => {
     const { professionalId, serviceId, startsAt } = createBody.parse(request.body);
     const requested = new Date(startsAt);
 
@@ -81,7 +113,7 @@ export async function appointmentRoutes(app: FastifyInstance) {
     return reply.status(201).send(toResponse(appointment));
   });
 
-  app.get("/me", { onRequest: app.authenticate }, async (request) => {
+  app.get("/me", { schema: docs.listMyAppointments, onRequest: app.authenticate }, async (request) => {
     const { scope, limit, offset } = listQuery.parse(request.query);
     const now = new Date();
 
@@ -99,7 +131,7 @@ export async function appointmentRoutes(app: FastifyInstance) {
     return appointments.map(toResponse);
   });
 
-  app.post("/:id/cancel", { onRequest: app.authenticate }, async (request, reply) => {
+  app.post("/:id/cancel", { schema: docs.cancelAppointment, onRequest: app.authenticate }, async (request, reply) => {
     const { id } = idParams.parse(request.params);
     const { sub, role } = request.user;
 

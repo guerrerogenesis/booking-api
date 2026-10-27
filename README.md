@@ -38,6 +38,17 @@ npx prisma migrate dev
 npm run dev        # http://localhost:3000/health
 ```
 
+## API docs
+
+Interactive OpenAPI 3.1 docs at http://localhost:3000/docs (raw spec at `/docs/json`).
+
+- **Generated from the code.** Request schemas are the same Zod schemas the handlers validate
+  with, converted with `z.toJSONSchema`, so the docs can't drift from the validation.
+- **Every route must be documented**, or the app refuses to start.
+- **Contract test.** `src/docs.test.ts` walks the whole booking flow and checks every response's
+  status is documented and its body matches the strict response schema, so an undocumented
+  or leaked field (like an email) fails the build.
+
 ## Endpoints
 
 | Method | Path             | Auth | Description                                  |

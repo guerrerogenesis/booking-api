@@ -38,6 +38,17 @@ npx prisma migrate dev
 npm run dev        # http://localhost:3000/health
 ```
 
+## Documentación de la API
+
+Documentación interactiva OpenAPI 3.1 en http://localhost:3000/docs (la especificación en `/docs/json`).
+
+- **Generada desde el código.** Los esquemas de las peticiones son los mismos esquemas Zod con los que
+  validan los handlers, convertidos con `z.toJSONSchema`, así que la documentación no puede desfasarse de la validación.
+- **Toda ruta debe estar documentada**, o la app no arranca.
+- **Prueba de contrato.** `src/docs.test.ts` recorre el flujo completo de reservas y verifica que el código de
+  estado de cada respuesta esté documentado y que su cuerpo cumpla el esquema estricto, así que un campo no
+  documentado o filtrado (como un email) hace fallar la build.
+
 ## Endpoints
 
 | Método | Ruta             | Autenticación | Descripción                         |

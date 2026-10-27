@@ -2,6 +2,7 @@ import { Prisma } from "@prisma/client";
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import { prisma } from "../db.js";
+import { doc, tokenResponse, userResponse, withOperationIds } from "../docs.js";
 import { hashPassword, verifyPassword } from "./password.js";
 import { emailSchema, passwordSchema } from "./schemas.js";
 
@@ -20,8 +21,28 @@ const loginBody = z.strictObject({
 
 const publicUser = { id: true, email: true, name: true, role: true } as const;
 
+const docs = withOperationIds({
+  register: doc({
+    tag: "Auth",
+    summary: "Create an account",
+    description: "Registering as `PROFESSIONAL` also creates an empty professional profile.",
+    body: registerBody,
+    response: { 201: userResponse },
+    errors: [409],
+  }),
+  login: doc({
+    tag: "Auth",
+    summary: "Log in",
+    description: "Rate limited to 10 attempts per minute per IP.",
+    body: loginBody,
+    response: { 200: tokenResponse },
+    errors: [401, 429],
+  }),
+  getCurrentUser: doc({ tag: "Auth", summary: "Current user", auth: true, response: { 200: userResponse }, errors: [404] }),
+});
+
 export async function authRoutes(app: FastifyInstance) {
-  app.post("/register", async (request, reply) => {
+  app.post("/register", { schema: docs.register }, async (request, reply) => {
     const { password, ...data } = registerBody.parse(request.body);
 
     try {
@@ -42,7 +63,8 @@ export async function authRoutes(app: FastifyInstance) {
     }
   });
 
-  app.post("/login", { config: { rateLimit: { max: 10, timeWindow: "1 minute" } } }, async (request, reply) => {
+  const loginRateLimit = { max: 10, timeWindow: "1 minute" };
+  app.post("/login", { schema: docs.login, config: { rateLimit: loginRateLimit } }, async (request, reply) => {
     const { email, password } = loginBody.parse(request.body);
 
     const user = await prisma.user.findUnique({ where: { email } });
@@ -54,7 +76,7 @@ export async function authRoutes(app: FastifyInstance) {
     return { token };
   });
 
-  app.get("/me", { onRequest: app.authenticate }, async (request, reply) => {
+  app.get("/me", { schema: docs.getCurrentUser, onRequest: app.authenticate }, async (request, reply) => {
     const user = await prisma.user.findUnique({ where: { id: request.user.sub }, select: publicUser });
     if (!user) return reply.status(404).send({ error: "User not found" });
     return user;

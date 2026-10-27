@@ -10,4 +10,5 @@ export const passwordSchema = z
   .regex(/[A-Z]/, "Must contain an uppercase letter")
   .regex(/[0-9]/, "Must contain a number")
   .regex(/[^A-Za-z0-9\s]/, "Must contain a symbol")
-  .regex(/^\S+$/, "Must not contain spaces");
+  .regex(/^\S+$/, "Must not contain spaces")
+  .meta({ description: "8-128 characters with an uppercase letter, a lowercase letter, a number and a symbol. No spaces." });

@@ -3,6 +3,15 @@ import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import { requireRole } from "../auth/plugin.js";
 import { prisma } from "../db.js";
+import {
+  availabilityResponse,
+  doc,
+  profileResponse,
+  serviceResponse,
+  slotsResponse,
+  timeOffResponse,
+  withOperationIds,
+} from "../docs.js";
 import { bookingWindow, findAvailableSlots } from "./slots.js";
 import { canonicalTimeZone, todayIn } from "./timezone.js";
 
@@ -66,7 +75,12 @@ const updateServiceBody = z
   .refine((body) => Object.keys(body).length > 0, "At least one field is required");
 
 // Minutes from midnight, in 5-minute steps so slots line up with service durations.
-const minuteOfDay = z.int().min(0).max(1440).multipleOf(5);
+const minuteOfDay = z
+  .int()
+  .min(0)
+  .max(1440)
+  .multipleOf(5)
+  .meta({ description: "Minutes from midnight in the professional's timezone (540 = 09:00)" });
 const availabilityBody = z
   .strictObject({
     slots: z
@@ -129,15 +143,88 @@ function isPrismaError(err: unknown, code: string) {
   return err instanceof Prisma.PrismaClientKnownRequestError && err.code === code;
 }
 
+const ownProfile = { tag: "My profile", auth: true, errors: [403] } as const;
+
+const docs = withOperationIds({
+  getProfessional: doc({
+    tag: "Professionals",
+    summary: "Public profile",
+    params: idParams,
+    response: { 200: profileResponse },
+    errors: [404],
+  }),
+  getAvailableSlots: doc({
+    tag: "Professionals",
+    summary: "Available start times",
+    description:
+      "Free start times for a service on a date in the professional's timezone, every 15 minutes. " +
+      "Accounts for weekly availability, time off, the daily limit, the buffer between appointments and existing bookings. " +
+      "Bookable from 2 hours ahead up to 60 days ahead.",
+    params: idParams,
+    querystring: slotsQuery,
+    response: { 200: slotsResponse },
+    errors: [404],
+  }),
+  getMyProfile: doc({ ...ownProfile, summary: "Own profile", response: { 200: profileResponse } }),
+  updateMyProfile: doc({
+    ...ownProfile,
+    summary: "Update bio, timezone and booking settings",
+    body: profileBody,
+    response: { 200: profileResponse },
+  }),
+  createService: doc({ ...ownProfile, summary: "Create a service", body: createServiceBody, response: { 201: serviceResponse } }),
+  updateService: doc({
+    ...ownProfile,
+    summary: "Update a service",
+    params: serviceParams,
+    body: updateServiceBody,
+    response: { 200: serviceResponse },
+    errors: [403, 404],
+  }),
+  deleteService: doc({
+    ...ownProfile,
+    summary: "Delete a service",
+    description: "Services with appointments can't be deleted (`409`).",
+    params: serviceParams,
+    response: { 204: null },
+    errors: [403, 404, 409],
+  }),
+  replaceAvailability: doc({
+    ...ownProfile,
+    summary: "Replace the weekly schedule",
+    description: "Replaces all blocks atomically. Blocks on the same day can't overlap; an empty list clears the schedule.",
+    body: availabilityBody,
+    response: { 200: z.array(availabilityResponse) },
+  }),
+  listTimeOff: doc({ ...ownProfile, summary: "Upcoming time off", response: { 200: z.array(timeOffResponse) } }),
+  createTimeOff: doc({
+    ...ownProfile,
+    summary: "Add days out of service",
+    description:
+      "Whole days, inclusive, in the professional's timezone. Rejected with `409` if it overlaps other time off " +
+      "or if there are confirmed appointments on those days (they're listed in the response).",
+    body: timeOffBody,
+    response: { 201: timeOffResponse },
+    errors: [403, 409],
+  }),
+  deleteTimeOff: doc({
+    ...ownProfile,
+    summary: "Remove time off",
+    params: timeOffParams,
+    response: { 204: null },
+    errors: [403, 404],
+  }),
+});
+
 export async function professionalRoutes(app: FastifyInstance) {
-  app.get("/:id", async (request, reply) => {
+  app.get("/:id", { schema: docs.getProfessional }, async (request, reply) => {
     const { id } = idParams.parse(request.params);
     const profile = await findProfile({ id });
     if (!profile) return reply.status(404).send({ error: "Professional not found" });
     return profile;
   });
 
-  app.get("/:id/slots", async (request, reply) => {
+  app.get("/:id/slots", { schema: docs.getAvailableSlots }, async (request, reply) => {
     const { id } = idParams.parse(request.params);
     const { serviceId, date } = slotsQuery.parse(request.query);
 
@@ -178,15 +265,15 @@ export async function professionalRoutes(app: FastifyInstance) {
         request.professionalId = professional.id;
       });
 
-      me.get("/", async (request) => findProfile({ id: request.professionalId }));
+      me.get("", { schema: docs.getMyProfile }, async (request) => findProfile({ id: request.professionalId }));
 
-      me.patch("/", async (request) => {
+      me.patch("", { schema: docs.updateMyProfile }, async (request) => {
         const data = profileBody.parse(request.body);
         await prisma.professional.update({ where: { id: request.professionalId }, data });
         return findProfile({ id: request.professionalId });
       });
 
-      me.post("/services", async (request, reply) => {
+      me.post("/services", { schema: docs.createService }, async (request, reply) => {
         const data = createServiceBody.parse(request.body);
         const service = await prisma.service.create({
           data: { ...data, professionalId: request.professionalId },
@@ -195,7 +282,7 @@ export async function professionalRoutes(app: FastifyInstance) {
         return reply.status(201).send(service);
       });
 
-      me.patch("/services/:serviceId", async (request, reply) => {
+      me.patch("/services/:serviceId", { schema: docs.updateService }, async (request, reply) => {
         const { serviceId } = serviceParams.parse(request.params);
         const data = updateServiceBody.parse(request.body);
         try {
@@ -210,7 +297,7 @@ export async function professionalRoutes(app: FastifyInstance) {
         }
       });
 
-      me.delete("/services/:serviceId", async (request, reply) => {
+      me.delete("/services/:serviceId", { schema: docs.deleteService }, async (request, reply) => {
         const { serviceId } = serviceParams.parse(request.params);
         try {
           await prisma.service.delete({ where: { id: serviceId, professionalId: request.professionalId } });
@@ -225,7 +312,7 @@ export async function professionalRoutes(app: FastifyInstance) {
       });
 
       // Replaces the whole weekly schedule atomically.
-      me.put("/availability", async (request) => {
+      me.put("/availability", { schema: docs.replaceAvailability }, async (request) => {
         const { slots } = availabilityBody.parse(request.body);
         const professionalId = request.professionalId;
         await prisma.$transaction([
@@ -236,7 +323,7 @@ export async function professionalRoutes(app: FastifyInstance) {
       });
 
       // Upcoming time off (including any period in progress today).
-      me.get("/time-off", async (request) => {
+      me.get("/time-off", { schema: docs.listTimeOff }, async (request) => {
         const { timezone } = await prisma.professional.findUniqueOrThrow({
           where: { id: request.professionalId },
           select: { timezone: true },
@@ -249,7 +336,7 @@ export async function professionalRoutes(app: FastifyInstance) {
         return timeOff.map(formatTimeOff);
       });
 
-      me.post("/time-off", async (request, reply) => {
+      me.post("/time-off", { schema: docs.createTimeOff }, async (request, reply) => {
         const { startDate, endDate, reason } = timeOffBody.parse(request.body);
         const professionalId = request.professionalId;
 
@@ -295,7 +382,7 @@ export async function professionalRoutes(app: FastifyInstance) {
         return reply.status(result.status).send(result.body);
       });
 
-      me.delete("/time-off/:timeOffId", async (request, reply) => {
+      me.delete("/time-off/:timeOffId", { schema: docs.deleteTimeOff }, async (request, reply) => {
         const { timeOffId } = timeOffParams.parse(request.params);
         try {
           await prisma.timeOff.delete({ where: { id: timeOffId, professionalId: request.professionalId } });

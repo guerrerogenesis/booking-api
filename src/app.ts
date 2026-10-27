@@ -6,6 +6,7 @@ import { appointmentRoutes } from "./appointments/routes.js";
 import { passwordResetRoutes } from "./auth/password-reset.js";
 import { registerAuth } from "./auth/plugin.js";
 import { authRoutes } from "./auth/routes.js";
+import { doc, healthResponse, registerDocs } from "./docs.js";
 import { createNotifier, type Notifier } from "./notifications/notifier.js";
 import { professionalRoutes } from "./professionals/routes.js";
 
@@ -29,12 +30,17 @@ export function buildApp(options: { notifier?: Notifier } = {}) {
       .send({ error: statusCode >= 500 ? "Internal Server Error" : error.message });
   });
 
+  registerDocs(app);
   registerAuth(app);
   app.decorate("notifier", options.notifier ?? createNotifier());
   // Opt-in per route via `config.rateLimit`. In-memory store: use Redis when running multiple instances.
   app.register(rateLimit, { global: false });
 
-  app.get("/health", async () => ({ status: "ok" }));
+  // Inside a plugin so it's registered after the docs plugin and shows up in the spec.
+  app.register(async (health) => {
+    const schema = { ...doc({ tag: "Health", summary: "Health check", response: { 200: healthResponse } }), operationId: "healthCheck" };
+    health.get("/health", { schema }, async () => ({ status: "ok" }));
+  });
   app.register(authRoutes, { prefix: "/auth" });
   app.register(passwordResetRoutes, { prefix: "/auth/password-reset" });
   app.register(professionalRoutes, { prefix: "/professionals" });

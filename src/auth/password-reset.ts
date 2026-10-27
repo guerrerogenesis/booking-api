@@ -2,6 +2,7 @@ import { createHash, createHmac, randomBytes, randomInt, timingSafeEqual } from 
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import { prisma } from "../db.js";
+import { doc, messageResponse, resetTokenResponse, withOperationIds } from "../docs.js";
 import { hashPassword, verifyPassword } from "./password.js";
 import { emailSchema, passwordSchema } from "./schemas.js";
 
@@ -33,8 +34,37 @@ function hashToken(token: string) {
   return createHash("sha256").update(token).digest("hex");
 }
 
+const docs = withOperationIds({
+  requestPasswordReset: doc({
+    tag: "Password reset",
+    summary: "1. Email a reset code",
+    description:
+      "Always answers `202` with the same message, whether or not the email is registered. " +
+      "The 6-digit code expires in 15 minutes; a new one can't be sent within 60 seconds. Rate limited to 5 per 15 minutes per IP.",
+    body: requestBody,
+    response: { 202: messageResponse },
+    errors: [429],
+  }),
+  verifyResetCode: doc({
+    tag: "Password reset",
+    summary: "2. Exchange the code for a reset token",
+    description: "Each code allows 5 attempts. Rate limited to 10 per 15 minutes per IP.",
+    body: verifyBody,
+    response: { 200: resetTokenResponse },
+    errors: [429],
+  }),
+  confirmPasswordReset: doc({
+    tag: "Password reset",
+    summary: "3. Set a new password",
+    description: "The reset token is single-use. The new password must differ from the current one.",
+    body: confirmBody,
+    response: { 204: null },
+    errors: [429],
+  }),
+});
+
 export async function passwordResetRoutes(app: FastifyInstance) {
-  app.post("/request", { config: { rateLimit } }, async (request, reply) => {
+  app.post("/request", { schema: docs.requestPasswordReset, config: { rateLimit } }, async (request, reply) => {
     const { email } = requestBody.parse(request.body);
     const user = await prisma.user.findUnique({ where: { email } });
 
@@ -68,7 +98,7 @@ export async function passwordResetRoutes(app: FastifyInstance) {
     return reply.status(202).send({ message: "If the email is registered, a code has been sent" });
   });
 
-  app.post("/verify", { config: { rateLimit: verifyRateLimit } }, async (request, reply) => {
+  app.post("/verify", { schema: docs.verifyResetCode, config: { rateLimit: verifyRateLimit } }, async (request, reply) => {
     const { email, code } = verifyBody.parse(request.body);
     const invalid = () => reply.status(400).send({ error: "Invalid or expired code" });
 
@@ -94,7 +124,7 @@ export async function passwordResetRoutes(app: FastifyInstance) {
     return { resetToken };
   });
 
-  app.post("/confirm", { config: { rateLimit } }, async (request, reply) => {
+  app.post("/confirm", { schema: docs.confirmPasswordReset, config: { rateLimit } }, async (request, reply) => {
     const { resetToken, newPassword } = confirmBody.parse(request.body);
 
     const reset = await prisma.passwordReset.findUnique({
