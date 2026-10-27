@@ -24,8 +24,23 @@ model User {
   name         String
   role         Role          @default(CLIENT)
   createdAt    DateTime      @default(now())
-  professional Professional?
-  appointments Appointment[]
+  professional   Professional?
+  appointments   Appointment[]
+  passwordResets PasswordReset[]
+}
+
+// One active reset flow per user: emailed code -> verified -> reset token.
+model PasswordReset {
+  id             String   @id @default(uuid())
+  userId         String
+  user           User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  codeHash       String
+  attempts       Int      @default(0)
+  resetTokenHash String?  @unique
+  expiresAt      DateTime
+  createdAt      DateTime @default(now())
+
+  @@index([userId])
 }
 
 model Professional {
