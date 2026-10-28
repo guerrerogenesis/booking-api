@@ -20,6 +20,7 @@ COPY --from=build /app/dist ./dist
 COPY --from=build /app/prisma ./prisma
 USER node
 EXPOSE 3000
-# Migrations run on boot because Render's free plan has no pre-deploy step.
+# Migrations run on boot because Render's free plan has no pre-deploy step. With SEED_DEMO=true,
+# the public demo accounts are restored on every boot too.
 # exec makes node PID 1, so it receives SIGTERM and shuts down cleanly.
-CMD ["sh", "-c", "./node_modules/.bin/prisma migrate deploy && exec node dist/server.js"]
+CMD ["sh", "-c", "./node_modules/.bin/prisma migrate deploy && if [ \"$SEED_DEMO\" = true ]; then node dist/seed-demo.js; fi && exec node dist/server.js"]

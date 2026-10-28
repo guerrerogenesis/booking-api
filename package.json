@@ -13,7 +13,8 @@
     "typecheck": "tsc",
     "test": "vitest run",
     "db:migrate": "prisma migrate dev",
-    "db:generate": "prisma generate"
+    "db:generate": "prisma generate",
+    "db:seed:demo": "tsx --env-file=.env src/seed-demo.ts"
   },
   "dependencies": {
     "@fastify/jwt": "^10.2.5",

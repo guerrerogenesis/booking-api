@@ -35,6 +35,8 @@ beforeEach(async () => {
     url: "/auth/register",
     payload: { email, password: oldPassword, name: "Ana" },
   });
+  await prisma.user.update({ where: { email }, data: { emailVerifiedAt: new Date() } });
+  sent = []; // drop the verification email
 });
 
 afterEach(() => app.close());
@@ -71,6 +73,16 @@ describe("POST /request", () => {
     expect(unknown.statusCode).toBe(known.statusCode);
     expect(unknown.json()).toEqual(known.json());
     expect(sent).toHaveLength(1);
+  });
+
+  it("sends nothing to an unverified email, with the same response", async () => {
+    await prisma.user.update({ where: { email }, data: { emailVerifiedAt: null } });
+
+    const res = await post("/request", { email });
+
+    expect(res.statusCode).toBe(202);
+    expect(res.json()).toEqual({ message: "If the email is registered, a code has been sent" });
+    expect(sent).toHaveLength(0);
   });
 
   it("does not resend a code during the cooldown", async () => {

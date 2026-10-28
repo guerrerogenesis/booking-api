@@ -1,14 +1,11 @@
-import { createHash, createHmac, randomBytes, randomInt, timingSafeEqual } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import { prisma } from "../db.js";
 import { doc, messageResponse, resetTokenResponse, withOperationIds } from "../docs.js";
+import { CODE_TTL_MS, MAX_ATTEMPTS, codeMatches, codeSchema, generateCode, hashCode, inCooldown } from "./codes.js";
 import { hashPassword, verifyPassword } from "./password.js";
 import { emailSchema, passwordSchema } from "./schemas.js";
-
-const CODE_TTL_MS = 15 * 60 * 1000;
-const RESEND_COOLDOWN_MS = 60 * 1000;
-const MAX_ATTEMPTS = 5;
 
 // Per-IP throttle, counted separately for each route. Verify allows more because
 // each code already has its own MAX_ATTEMPTS limit.
@@ -18,17 +15,12 @@ const verifyRateLimit = { max: 10, timeWindow: "15 minutes" };
 const requestBody = z.strictObject({ email: emailSchema });
 const verifyBody = z.strictObject({
   email: emailSchema,
-  code: z.string().regex(/^\d{6}$/, "Must be a 6-digit code"),
+  code: codeSchema,
 });
 const confirmBody = z.strictObject({
   resetToken: z.string().regex(/^[a-f0-9]{64}$/, "Invalid reset token format"),
   newPassword: passwordSchema,
 });
-
-// A 6-digit code is trivial to brute-force from a plain hash, so it is keyed with a server secret.
-function hashCode(code: string) {
-  return createHmac("sha256", process.env.JWT_SECRET!).update(code).digest();
-}
 
 function hashToken(token: string) {
   return createHash("sha256").update(token).digest("hex");
@@ -40,6 +32,7 @@ const docs = withOperationIds({
     summary: "1. Email a reset code",
     description:
       "Always answers `202` with the same message, whether or not the email is registered. " +
+      "Codes are only sent to verified emails. " +
       "The 6-digit code expires in 15 minutes; a new one can't be sent within 60 seconds. Rate limited to 5 per 15 minutes per IP.",
     body: requestBody,
     response: { 202: messageResponse },
@@ -68,26 +61,27 @@ export async function passwordResetRoutes(app: FastifyInstance) {
     const { email } = requestBody.parse(request.body);
     const user = await prisma.user.findUnique({ where: { email } });
 
-    const latest = user
-      ? await prisma.passwordReset.findFirst({ where: { userId: user.id }, orderBy: { createdAt: "desc" } })
+    // Unverified emails get nothing: the address may belong to someone who never signed up.
+    const eligible = user?.emailVerifiedAt ? user : null;
+    const latest = eligible
+      ? await prisma.passwordReset.findFirst({ where: { userId: eligible.id }, orderBy: { createdAt: "desc" } })
       : null;
-    const inCooldown = latest !== null && Date.now() - latest.createdAt.getTime() < RESEND_COOLDOWN_MS;
 
-    if (user && !inCooldown) {
-      const code = randomInt(0, 1_000_000).toString().padStart(6, "0");
+    if (eligible && !inCooldown(latest)) {
+      const code = generateCode();
       await prisma.$transaction([
-        prisma.passwordReset.deleteMany({ where: { userId: user.id } }),
+        prisma.passwordReset.deleteMany({ where: { userId: eligible.id } }),
         prisma.passwordReset.create({
           data: {
-            userId: user.id,
-            codeHash: hashCode(code).toString("hex"),
+            userId: eligible.id,
+            codeHash: hashCode(code),
             expiresAt: new Date(Date.now() + CODE_TTL_MS),
           },
         }),
       ]);
       // Not awaited, so response time doesn't reveal whether the email exists.
       app.notifier
-        .notify(user, {
+        .notify(eligible, {
           subject: "Your password reset code",
           text: `Your code is ${code}. It expires in 15 minutes. If you didn't request it, ignore this message.`,
         })
@@ -112,7 +106,7 @@ export async function passwordResetRoutes(app: FastifyInstance) {
       where: { id: reset.id, attempts: { lt: MAX_ATTEMPTS } },
       data: { attempts: { increment: 1 } },
     });
-    if (count === 0 || !timingSafeEqual(hashCode(code), Buffer.from(reset.codeHash, "hex"))) {
+    if (count === 0 || !codeMatches(code, reset.codeHash)) {
       return invalid();
     }
 

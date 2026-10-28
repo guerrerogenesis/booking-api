@@ -4,6 +4,16 @@
 
 [English](README.md) · **Español**
 
+**Demo en vivo:** [booking-api-rg2g.onrender.com/docs](https://booking-api-rg2g.onrender.com/docs) (instancia gratuita: la primera petición tras un rato sin uso puede tardar hasta un minuto)
+
+| Cuenta demo  | Email | Contraseña |
+| ------------ | ----- | ---------- |
+| Profesional  | `pro.demo@example.com` | `Demo$ecret1` |
+| Cliente      | `client.demo@example.com` | `Demo$ecret1` |
+
+Inicia sesión con `POST /auth/login`, haz clic en **Authorize** y pega el token. La demo no envía correos,
+así que ahí no se pueden verificar registros nuevos; las cuentas demo se restauran en cada arranque.
+
 <!-- portfolio:es -->
 API REST para agendar citas con profesionales. La propia base de datos impide que dos citas se empalmen, y la recuperación de contraseña está diseñada contra la enumeración de cuentas y los ataques de fuerza bruta.
 <!-- /portfolio:es -->
@@ -51,13 +61,22 @@ Documentación interactiva OpenAPI 3.1 en http://localhost:3000/docs (la especif
   estado de cada respuesta esté documentado y que su cuerpo cumpla el esquema estricto, así que un campo no
   documentado o filtrado (como un email) hace fallar la build.
 
+### Postman
+
+Importa `postman/booking-api.postman_collection.json` y `postman/local.postman_environment.json`.
+Al correr la colección de principio a fin contra tu entorno local se recorre todo el flujo sin intervención:
+cada request guarda los tokens e ids que necesitan los siguientes, cada corrida registra cuentas nuevas y
+los códigos de verificación y de recuperación se leen de Mailpit.
+
 ## Endpoints
 
 | Método | Ruta             | Autenticación | Descripción                         |
 | ------ | ---------------- | ---- | -------------------------------------------- |
 | GET    | `/health`        | —    | Verificación de estado                       |
-| POST   | `/auth/register` | —    | Crea una cuenta `CLIENT` o `PROFESSIONAL`    |
-| POST   | `/auth/login`    | —    | Devuelve un JWT (válido por 1 hora)          |
+| POST   | `/auth/register` | —    | Crea una cuenta `CLIENT` o `PROFESSIONAL` y envía un código de verificación |
+| POST   | `/auth/verify-email` | — | Verifica el email con el código (necesario para iniciar sesión) |
+| POST   | `/auth/verify-email/resend` | — | Envía un nuevo código de verificación (siempre `202`) |
+| POST   | `/auth/login`    | —    | Devuelve un JWT (válido por 1 hora; `403` si el email no está verificado) |
 | GET    | `/auth/me`       | JWT  | Usuario actual                               |
 | POST   | `/auth/password-reset/request` | — | Envía por correo un código de 6 dígitos (siempre `202`) |
 | POST   | `/auth/password-reset/verify`  | — | Cambia el código por un token de restablecimiento |
@@ -100,9 +119,23 @@ profesional devuelve `404`, no `403`, para no revelar que existe.
 Las contraseñas se guardan como hash con `scrypt`, incluido en Node (con un salt aleatorio por usuario), y deben
 tener entre 8 y 128 caracteres, con una mayúscula, una minúscula, un número y un símbolo, y sin espacios.
 
+### Verificación de email y protección contra abuso
+
+Cada cuenta genera correos, así que la API se asegura de escribir solo a direcciones cuyo dueño lo pidió:
+
+- Las cuentas nuevas reciben un código de 6 dígitos (con las mismas reglas que los códigos de recuperación) y no
+  pueden iniciar sesión hasta verificarse, así que nunca se envía nada más (reservas, cambios, códigos de
+  recuperación) a una dirección sin verificar.
+- El registro tiene rate limit de 5 por hora por IP.
+- Un tope global (`NOTIFICATION_DAILY_LIMIT`, 100 por día UTC por defecto) decora el notifier, así que ni el
+  tráfico desde muchas IPs puede agotar la cuota del proveedor de correo. El contador es un upsert atómico en
+  PostgreSQL, así que sobrevive a los reinicios y es exacto con peticiones simultáneas.
+- Si alguien registra tu correo antes que tú, puedes recuperarlo: pide un nuevo código de verificación,
+  verifica y después restablece la contraseña.
+
 ### Seguridad en la recuperación de contraseña
 
-- La respuesta es la misma exista o no el correo, así que no se pueden enumerar cuentas.
+- La respuesta es la misma exista o no el correo, así que no se pueden enumerar cuentas. Los códigos solo se envían a correos verificados.
 - Los códigos expiran a los 15 minutos, permiten 5 intentos y se guardan como HMAC, nunca en texto plano.
 - No se puede solicitar un código nuevo antes de 60 segundos desde el anterior.
 - El token de restablecimiento es de un solo uso, incluso con solicitudes simultáneas.
@@ -121,30 +154,39 @@ tener entre 8 y 128 caracteres, con una mayúscula, una minúscula, un número y
 ## Notificaciones
 
 Las notificaciones pasan por una interfaz `Notifier` (patrón adapter), así que el canal puede cambiar
-sin tocar la lógica de negocio. El correo (SMTP con nodemailer) es el canal predeterminado; elige el canal
-con `NOTIFIER_CHANNEL`. Para agregar SMS o WhatsApp, implementa `Notifier` en `src/notifications/`
-y regístralo en `createNotifier()`.
+sin tocar la lógica de negocio. Elige el canal con `NOTIFIER_CHANNEL`:
+
+- `email` (predeterminado): SMTP con nodemailer.
+- `log`: no envía nada y registra en el log el destinatario y el asunto (nunca el cuerpo, que puede llevar
+  códigos). La demo pública lo usa: con correos reales, cualquiera podría registrar direcciones temporales
+  y agotar la cuota del proveedor.
+
+Para agregar SMS o WhatsApp, implementa `Notifier` en `src/notifications/` y regístralo en `createNotifier()`.
 
 En desarrollo, los correos los captura [Mailpit](https://mailpit.axllent.org/): abre http://localhost:8025.
 
 ## Deploy
 
 El `Dockerfile` construye una imagen de producción (multi-stage, sin dependencias de desarrollo,
-y corre con un usuario sin privilegios de root). Al arrancar aplica las migraciones pendientes y
-luego inicia el servidor; con `SIGTERM` se cierra de forma ordenada para que terminen las peticiones en curso.
+y corre con un usuario sin privilegios de root). Al arrancar aplica las migraciones pendientes, restaura las
+cuentas demo si `SEED_DEMO=true` y luego inicia el servidor; con `SIGTERM` se cierra de forma ordenada para
+que terminen las peticiones en curso.
 
 Configuración gratuita: la API en [Render](https://render.com) y la base de datos en [Neon](https://neon.tech).
 
 1. Crea un proyecto en Neon y copia su cadena de conexión **directa** (sin pooling); las migraciones la necesitan.
 2. En Render: **New > Blueprint** y elige este repo. `render.yaml` define el servicio; llena
-   `DATABASE_URL` y los valores de SMTP. `JWT_SECRET` se genera solo.
-3. Para los correos, usa un proveedor SMTP (p. ej. Mailtrap) con `SMTP_USER` y `SMTP_PASS`. El plan gratuito
-   de Render bloquea los puertos 25, 465 y 587, así que elige un proveedor que acepte el puerto 2525.
+   `DATABASE_URL`. `JWT_SECRET` se genera solo.
+3. El blueprint usa el canal `log` y crea las cuentas demo. Para enviar correos reales, pon
+   `NOTIFIER_CHANNEL=email` junto con `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASS` y `MAIL_FROM`.
+   El plan gratuito de Render bloquea los puertos 25, 465 y 587, así que elige un proveedor que acepte el puerto 2525.
 
 Las instancias gratuitas de Render se suspenden tras ~15 minutos sin tráfico, así que la primera petición puede tardar hasta un minuto.
 
-`TRUST_PROXY_HOPS` es el número de proxies delante de la app (`1` en Render), para que el rate limit
-use la IP real del cliente. Es un número de saltos y no "confiar en todo" porque Render agrega su IP a
+`TRUST_PROXY_HOPS` es el número de proxies delante de la app, para que el rate limit use la IP real
+del cliente. En Render es `3` (Cloudflare y dos proxies de Render), medido en el servicio desplegado:
+el `remoteAddress` del log coincide con el del cliente y un `X-Forwarded-For` falsificado se ignora.
+Es un número de saltos y no "confiar en todo" porque Render agrega su IP a
 `X-Forwarded-For` en lugar de reemplazar el encabezado: confiar en todo el encabezado permitiría que un cliente
 falsificara su IP y se saltara el rate limit. Una prueba demuestra que la dirección falsificada se ignora.
 
@@ -156,5 +198,6 @@ falsificara su IP y se saltara el rate limit. Una prueba demuestra que la direcc
 | `npm test`          | Ejecuta las pruebas (usa una base de datos `booking_test` aparte) |
 | `npm run typecheck` | Verifica los tipos del proyecto |
 | `npm run build`     | Compila a `dist/`      |
+| `npm run db:seed:demo` | Crea o restaura las cuentas demo |
 
 ¿Preguntas? [Escríbeme](mailto:guerrerogenesisd@gmail.com).

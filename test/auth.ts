@@ -12,6 +12,7 @@ export async function createUser(app: FastifyInstance, role: Role = "CLIENT") {
       email: `${randomUUID()}@example.com`,
       name: `Test ${role.toLowerCase()}`,
       passwordHash: "unused",
+      emailVerifiedAt: new Date(),
       role,
       professional: role === "PROFESSIONAL" ? { create: {} } : undefined,
     },

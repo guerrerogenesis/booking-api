@@ -3,6 +3,7 @@ import Fastify, { type FastifyError } from "fastify";
 import { ZodError } from "zod";
 import { rescheduleRoutes } from "./appointments/reschedule.js";
 import { appointmentRoutes } from "./appointments/routes.js";
+import { emailVerificationRoutes } from "./auth/email-verification.js";
 import { passwordResetRoutes } from "./auth/password-reset.js";
 import { registerAuth } from "./auth/plugin.js";
 import { authRoutes } from "./auth/routes.js";
@@ -20,7 +21,7 @@ export function buildApp(options: { notifier?: Notifier } = {}) {
   const proxyHops = Number(process.env.TRUST_PROXY_HOPS ?? 0);
   const app = Fastify({
     logger: process.env.NODE_ENV !== "test",
-    // Number of proxies in front of the app (1 on Render). A hop count instead of `true`, because
+    // Number of proxies in front of the app (3 on Render). A hop count instead of `true`, because
     // Render appends to X-Forwarded-For instead of replacing it, so `true` would let clients spoof
     // their IP and dodge the rate limits.
     trustProxy: (_address, hop) => hop < proxyHops,
@@ -39,7 +40,7 @@ export function buildApp(options: { notifier?: Notifier } = {}) {
 
   registerDocs(app);
   registerAuth(app);
-  app.decorate("notifier", options.notifier ?? createNotifier());
+  app.decorate("notifier", options.notifier ?? createNotifier(app.log));
   // Opt-in per route via `config.rateLimit`. In-memory store: use Redis when running multiple instances.
   app.register(rateLimit, { global: false });
 
@@ -49,6 +50,7 @@ export function buildApp(options: { notifier?: Notifier } = {}) {
     health.get("/health", { schema }, async () => ({ status: "ok" }));
   });
   app.register(authRoutes, { prefix: "/auth" });
+  app.register(emailVerificationRoutes, { prefix: "/auth/verify-email" });
   app.register(passwordResetRoutes, { prefix: "/auth/password-reset" });
   app.register(professionalRoutes, { prefix: "/professionals" });
   app.register(appointmentRoutes, { prefix: "/appointments" });

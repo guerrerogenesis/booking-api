@@ -86,7 +86,7 @@ describe("OpenAPI spec", () => {
     const operations = Object.values(spec.paths).flatMap((methods) => Object.values(methods));
 
     expect(spec.openapi).toBe("3.1.0");
-    expect(operations).toHaveLength(27);
+    expect(operations).toHaveLength(29);
     const ids = operations.map((op) => op.operationId);
     expect(new Set(ids).size).toBe(operations.length);
     for (const op of operations) {
@@ -108,15 +108,26 @@ describe("responses match the documented schemas", () => {
     await call("GET", "/health", { status: 200, schema: healthResponse });
 
     // Accounts
+    const lastCode = () => sent.at(-1)!.text.match(/\d{6}/)![0];
+    const verify = (email: string) =>
+      call("POST", "/auth/verify-email", { payload: { email, code: lastCode() }, status: 204, schema: null });
+
     const proUser = await call("POST", "/auth/register", {
       payload: { email: "pro@example.com", password: "Sup3r$ecret", name: "Pro", role: "PROFESSIONAL" },
       status: 201,
       schema: userResponse,
     });
+    await verify("pro@example.com");
     await call("POST", "/auth/register", {
       payload: { email: "client@example.com", password: "Sup3r$ecret", name: "Client" },
       status: 201,
       schema: userResponse,
+    });
+    await verify("client@example.com");
+    await call("POST", "/auth/verify-email/resend", {
+      payload: { email: "client@example.com" },
+      status: 202,
+      schema: messageResponse,
     });
     const login = (email: string) =>
       call("POST", "/auth/login", { payload: { email, password: "Sup3r$ecret" }, status: 200, schema: tokenResponse });
@@ -234,9 +245,8 @@ describe("responses match the documented schemas", () => {
       status: 202,
       schema: messageResponse,
     });
-    const code = sent.at(-1)!.text.match(/\d{6}/)![0];
     const { resetToken } = await call("POST", "/auth/password-reset/verify", {
-      payload: { email: "client@example.com", code },
+      payload: { email: "client@example.com", code: lastCode() },
       status: 200,
       schema: resetTokenResponse,
     });
@@ -258,6 +268,9 @@ describe("responses match the documented schemas", () => {
     expect(validation.issues.length).toBeGreaterThan(0);
 
     await call("GET", "/auth/me", { status: 401, schema: errorResponse });
+    const unverified = { email: "unverified@example.com", password: "Sup3r$ecret" };
+    await call("POST", "/auth/register", { payload: { ...unverified, name: "U" }, status: 201, schema: userResponse });
+    await call("POST", "/auth/login", { payload: unverified, status: 403, schema: errorResponse });
     await call("GET", "/professionals/00000000-0000-4000-8000-000000000000", { status: 404, schema: errorResponse });
   });
 });

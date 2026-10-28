@@ -18,15 +18,18 @@ enum AppointmentStatus {
 }
 
 model User {
-  id             String          @id @default(uuid())
-  email          String          @unique
-  passwordHash   String
-  name           String
-  role           Role            @default(CLIENT)
-  createdAt      DateTime        @default(now())
-  professional   Professional?
-  appointments   Appointment[]
-  passwordResets PasswordReset[]
+  id                 String              @id @default(uuid())
+  email              String              @unique
+  passwordHash       String
+  name               String
+  role               Role                @default(CLIENT)
+  // Null until the emailed code is confirmed; unverified accounts can't log in.
+  emailVerifiedAt    DateTime?
+  createdAt          DateTime            @default(now())
+  professional       Professional?
+  appointments       Appointment[]
+  passwordResets     PasswordReset[]
+  emailVerifications EmailVerification[]
 }
 
 // One active reset flow per user: emailed code -> verified -> reset token.
@@ -41,6 +44,24 @@ model PasswordReset {
   createdAt      DateTime @default(now())
 
   @@index([userId])
+}
+
+model EmailVerification {
+  id        String   @id @default(uuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  codeHash  String
+  attempts  Int      @default(0)
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+}
+
+// One row per UTC day, counting notifications sent, so a daily cap survives restarts.
+model NotificationUsage {
+  day   DateTime @id @db.Date
+  count Int
 }
 
 model Professional {

@@ -2,20 +2,33 @@ import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { resetDb } from "../../test/db.js";
 import { buildApp } from "../app.js";
 import { prisma } from "../db.js";
+import type { Notification, Recipient } from "../notifications/notifier.js";
 
-const app = buildApp();
+const sent: (Notification & { to: Recipient })[] = [];
+const app = buildApp({ notifier: { notify: async (to, notification) => void sent.push({ to, ...notification }) } });
 
 const credentials = { email: "ana@example.com", password: "Sup3r$ecret", name: "Ana" };
 
-function register(body: object) {
-  return app.inject({ method: "POST", url: "/auth/register", payload: body });
+// Each call comes from a different IP, so only the rate limit test hits the register limit.
+let ip = 0;
+function register(body: object, remoteAddress = `10.0.${Math.floor(++ip / 250)}.${ip % 250}`) {
+  return app.inject({ method: "POST", url: "/auth/register", payload: body, remoteAddress });
+}
+
+async function registerVerified(body: typeof credentials) {
+  await register(body);
+  const code = sent.findLast((n) => n.to.email === body.email)!.text.match(/\d{6}/)![0];
+  await app.inject({ method: "POST", url: "/auth/verify-email", payload: { email: body.email, code } });
 }
 
 function login(body: object) {
   return app.inject({ method: "POST", url: "/auth/login", payload: body });
 }
 
-beforeEach(resetDb);
+beforeEach(async () => {
+  await resetDb();
+  sent.length = 0;
+});
 afterAll(async () => {
   await app.close();
   await prisma.$disconnect();
@@ -40,6 +53,24 @@ describe("POST /auth/register", () => {
     expect(res.statusCode).toBe(201);
     const professional = await prisma.professional.findUnique({ where: { userId: res.json().id } });
     expect(professional).not.toBeNull();
+  });
+
+  it("emails a verification code to the new address", async () => {
+    await register(credentials);
+
+    expect(sent).toHaveLength(1);
+    expect(sent[0].to.email).toBe(credentials.email);
+    expect(sent[0].text).toMatch(/\b\d{6}\b/);
+  });
+
+  it("allows 5 registrations per hour from the same IP", async () => {
+    for (let i = 0; i < 5; i++) {
+      const res = await register({ ...credentials, email: `user${i}@example.com` }, "203.0.113.1");
+      expect(res.statusCode).toBe(201);
+    }
+
+    const res = await register({ ...credentials, email: "user5@example.com" }, "203.0.113.1");
+    expect(res.statusCode).toBe(429);
   });
 
   it("rejects a duplicate email", async () => {
@@ -85,7 +116,7 @@ describe("POST /auth/register", () => {
 
 describe("POST /auth/login", () => {
   beforeEach(async () => {
-    await register(credentials);
+    await registerVerified(credentials);
   });
 
   it("returns a token for valid credentials", async () => {
@@ -104,11 +135,23 @@ describe("POST /auth/login", () => {
     expect(res.statusCode).toBe(401);
     expect(res.json()).toEqual({ error: "Invalid email or password" });
   });
+
+  it("rejects an unverified account, but only after the password matched", async () => {
+    const pending = { ...credentials, email: "pending@example.com" };
+    await register(pending);
+
+    const res = await login({ email: pending.email, password: pending.password });
+    expect(res.statusCode).toBe(403);
+    expect(res.json()).toEqual({ error: "Email not verified" });
+
+    const wrong = await login({ email: pending.email, password: "Wr0ng$pass" });
+    expect(wrong.statusCode).toBe(401);
+  });
 });
 
 describe("GET /auth/me", () => {
   it("returns the current user for a valid token", async () => {
-    await register(credentials);
+    await registerVerified(credentials);
     const { token } = (await login({ email: credentials.email, password: credentials.password })).json();
 
     const res = await app.inject({
