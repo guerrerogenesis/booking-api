@@ -138,7 +138,8 @@ Free setup: API on [Render](https://render.com), database on [Neon](https://neon
 1. Create a Neon project and copy its **direct** (non-pooled) connection string; migrations need it.
 2. On Render: **New > Blueprint**, pick this repo. `render.yaml` defines the service; fill in
    `DATABASE_URL` and the SMTP values. `JWT_SECRET` is generated for you.
-3. For emails, use any SMTP provider (e.g. Brevo or Resend) with `SMTP_USER` and `SMTP_PASS`.
+3. For emails, use an SMTP provider (e.g. Mailtrap) with `SMTP_USER` and `SMTP_PASS`. Render's free
+   plan blocks ports 25, 465 and 587, so pick a provider that accepts port 2525.
 
 Free Render instances sleep after ~15 minutes idle, so the first request can take up to a minute.
 

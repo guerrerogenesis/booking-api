@@ -16,8 +16,8 @@ services:
         value: email
       - key: SMTP_HOST
         sync: false
-      - key: SMTP_PORT
-        value: "587"
+      - key: SMTP_PORT # Render's free plan blocks 25, 465 and 587
+        value: "2525"
       - key: SMTP_USER
         sync: false
       - key: SMTP_PASS
