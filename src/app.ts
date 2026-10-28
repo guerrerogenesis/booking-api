@@ -17,7 +17,14 @@ declare module "fastify" {
 }
 
 export function buildApp(options: { notifier?: Notifier } = {}) {
-  const app = Fastify({ logger: process.env.NODE_ENV !== "test" });
+  const proxyHops = Number(process.env.TRUST_PROXY_HOPS ?? 0);
+  const app = Fastify({
+    logger: process.env.NODE_ENV !== "test",
+    // Number of proxies in front of the app (1 on Render). A hop count instead of `true`, because
+    // Render appends to X-Forwarded-For instead of replacing it, so `true` would let clients spoof
+    // their IP and dodge the rate limits.
+    trustProxy: (_address, hop) => hop < proxyHops,
+  });
 
   app.setErrorHandler<FastifyError | ZodError>((error, request, reply) => {
     if (error instanceof ZodError) {

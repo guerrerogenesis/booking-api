@@ -1,0 +1,26 @@
+# Render Blueprint: New > Blueprint, pick this repo, then fill in the values marked sync: false.
+services:
+  - type: web
+    name: booking-api
+    runtime: docker
+    plan: free
+    healthCheckPath: /health
+    envVars:
+      - key: DATABASE_URL # Neon direct (non-pooled) connection string
+        sync: false
+      - key: JWT_SECRET
+        generateValue: true
+      - key: TRUST_PROXY_HOPS
+        value: "1"
+      - key: NOTIFIER_CHANNEL
+        value: email
+      - key: SMTP_HOST
+        sync: false
+      - key: SMTP_PORT
+        value: "587"
+      - key: SMTP_USER
+        sync: false
+      - key: SMTP_PASS
+        sync: false
+      - key: MAIL_FROM
+        sync: false

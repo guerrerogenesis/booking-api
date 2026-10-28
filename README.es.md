@@ -1,5 +1,7 @@
 # Booking API
 
+[![CI](https://github.com/guerrerogenesis/booking-api/actions/workflows/ci.yml/badge.svg)](https://github.com/guerrerogenesis/booking-api/actions/workflows/ci.yml)
+
 [English](README.md) · **Español**
 
 <!-- portfolio:es -->
@@ -74,7 +76,6 @@ Documentación interactiva OpenAPI 3.1 en http://localhost:3000/docs (la especif
 | POST   | `/appointments`              | Client | Reserva un horario libre (`409` si no está disponible) |
 | GET    | `/appointments/me?scope&limit&offset` | JWT | Citas propias (`upcoming` o `past`) |
 | POST   | `/appointments/:id/cancel`   | JWT    | Cancela: el cliente necesita 48 h de anticipación; el profesional, en cualquier momento antes del inicio |
-
 | POST   | `/appointments/:id/reschedule-requests` | Client | Propone un nuevo horario (48 h de anticipación, una solicitud pendiente a la vez) |
 | GET    | `/appointments/:id/reschedule-requests` | JWT    | Historial de solicitudes de la cita |
 | POST   | `/appointments/:id/reschedule-requests/:requestId/accept` | Professional | Mueve la cita al horario propuesto |
@@ -125,6 +126,26 @@ con `NOTIFIER_CHANNEL`. Para agregar SMS o WhatsApp, implementa `Notifier` en `s
 y regístralo en `createNotifier()`.
 
 En desarrollo, los correos los captura [Mailpit](https://mailpit.axllent.org/): abre http://localhost:8025.
+
+## Deploy
+
+El `Dockerfile` construye una imagen de producción (multi-stage, sin dependencias de desarrollo,
+y corre con un usuario sin privilegios de root). Al arrancar aplica las migraciones pendientes y
+luego inicia el servidor; con `SIGTERM` se cierra de forma ordenada para que terminen las peticiones en curso.
+
+Configuración gratuita: la API en [Render](https://render.com) y la base de datos en [Neon](https://neon.tech).
+
+1. Crea un proyecto en Neon y copia su cadena de conexión **directa** (sin pooling); las migraciones la necesitan.
+2. En Render: **New > Blueprint** y elige este repo. `render.yaml` define el servicio; llena
+   `DATABASE_URL` y los valores de SMTP. `JWT_SECRET` se genera solo.
+3. Para los correos, usa cualquier proveedor SMTP (p. ej. Brevo o Resend) con `SMTP_USER` y `SMTP_PASS`.
+
+Las instancias gratuitas de Render se suspenden tras ~15 minutos sin tráfico, así que la primera petición puede tardar hasta un minuto.
+
+`TRUST_PROXY_HOPS` es el número de proxies delante de la app (`1` en Render), para que el rate limit
+use la IP real del cliente. Es un número de saltos y no "confiar en todo" porque Render agrega su IP a
+`X-Forwarded-For` en lugar de reemplazar el encabezado: confiar en todo el encabezado permitiría que un cliente
+falsificara su IP y se saltara el rate limit. Una prueba demuestra que la dirección falsificada se ignora.
 
 ## Scripts
 

@@ -181,7 +181,8 @@ export function registerDocs(app: FastifyInstance) {
         description:
           "Appointments with professionals. All times are ISO 8601 instants; local times are in the professional's timezone.",
       },
-      servers: [{ url: "http://localhost:3000", description: "Local development" }],
+      // Relative, so "Try it out" calls whichever host is serving the docs (local or deployed).
+      servers: [{ url: "/", description: "This server" }],
       tags: [
         { name: "Health", description: "Service status" },
         { name: "Auth", description: "Accounts and JWT login" },

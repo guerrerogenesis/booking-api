@@ -1,5 +1,7 @@
 # Booking API
 
+[![CI](https://github.com/guerrerogenesis/booking-api/actions/workflows/ci.yml/badge.svg)](https://github.com/guerrerogenesis/booking-api/actions/workflows/ci.yml)
+
 **English** · [Español](README.es.md)
 
 <!-- portfolio:en -->
@@ -74,7 +76,6 @@ Interactive OpenAPI 3.1 docs at http://localhost:3000/docs (raw spec at `/docs/j
 | POST   | `/appointments`              | Client | Book a free slot (`409` if not available) |
 | GET    | `/appointments/me?scope&limit&offset` | JWT | Own appointments (`upcoming` or `past`) |
 | POST   | `/appointments/:id/cancel`   | JWT    | Cancel: clients need 48h notice, professionals any time before start |
-
 | POST   | `/appointments/:id/reschedule-requests` | Client | Propose a new time (48h notice, one pending at a time) |
 | GET    | `/appointments/:id/reschedule-requests` | JWT    | Request history for the appointment |
 | POST   | `/appointments/:id/reschedule-requests/:requestId/accept` | Professional | Move the appointment to the proposed time |
@@ -125,6 +126,26 @@ with `NOTIFIER_CHANNEL`. To add SMS or WhatsApp, implement `Notifier` in `src/no
 and register it in `createNotifier()`.
 
 In development, emails are caught by [Mailpit](https://mailpit.axllent.org/): open http://localhost:8025.
+
+## Deploy
+
+The `Dockerfile` builds a production image (multi-stage, dev dependencies pruned, runs as a
+non-root user). On boot it applies pending migrations, then starts the server; `SIGTERM` closes
+it gracefully so in-flight requests finish.
+
+Free setup: API on [Render](https://render.com), database on [Neon](https://neon.tech).
+
+1. Create a Neon project and copy its **direct** (non-pooled) connection string; migrations need it.
+2. On Render: **New > Blueprint**, pick this repo. `render.yaml` defines the service; fill in
+   `DATABASE_URL` and the SMTP values. `JWT_SECRET` is generated for you.
+3. For emails, use any SMTP provider (e.g. Brevo or Resend) with `SMTP_USER` and `SMTP_PASS`.
+
+Free Render instances sleep after ~15 minutes idle, so the first request can take up to a minute.
+
+`TRUST_PROXY_HOPS` is the number of proxies in front of the app (`1` on Render), so rate limits
+use the real client IP. It's a hop count rather than "trust everything" because Render appends
+to `X-Forwarded-For` instead of replacing it: trusting the whole header would let a client
+spoof its IP and dodge the rate limits. A test proves the spoofed address is ignored.
 
 ## Scripts
 
